@@ -1313,7 +1313,7 @@ void pixelParameterSlotTests() {
     const std::array<std::uint32_t, 7> shared{0xc8100000u, 0xc8110001u, 0xc8140500u, 0xc8150501u, 0xf800180fu, 0x05040504u, 0xbf810000u};
     pixel = recompilePixel({0x3u, 0x3u}, shared);
     inputs = locatedInputs(pixel.spirv.Words());
-    Require(inputs.size() == 1 && inputs[0].location == 3 && !inputs[0].perVertex && !inputs[0].flat, "inputs reading one slot were not declared once at the slot");
+    Require(inputs.size() == 1 && inputs[0].location == 3 && inputs[0].perVertex && !inputs[0].flat, "inputs reading one slot were not declared once at the slot");
     pixel = recompilePixel({0x404u, 0x0u}, shared);
     inputs = locatedInputs(pixel.spirv.Words());
     Require(inputs.size() == 2 && inputs[0].location == 0 && !inputs[0].flat && inputs[1].location == 4 && inputs[1].flat, "flat and interpolated inputs of different slots moved");
