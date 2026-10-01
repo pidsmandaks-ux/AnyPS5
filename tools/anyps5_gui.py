@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import os
 import queue
-import shutil
 import subprocess
-import sys
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -191,8 +189,14 @@ class AnyPS5Gui(tk.Tk):
         ttk.Checkbutton(grid, text="Skip sce_module/sce_modules", variable=self.skip_modules_var, command=self._refresh_command).grid(row=0, column=1, sticky="w", padx=(0, 16), pady=2)
         ttk.Checkbutton(grid, text="Lazy binding", variable=self.lazy_binding_var, command=self._refresh_command).grid(row=0, column=2, sticky="w", pady=2)
         ttk.Checkbutton(grid, text="Write registry JSON", variable=self.registry_var, command=self._refresh_command).grid(row=1, column=0, sticky="w", pady=2)
-        ttk.Checkbutton(grid, text="Windows diagnostics", variable=self.windows_diagnostics_var, command=self._refresh_command).grid(row=1, column=1, sticky="w", pady=2)
-        ttk.Checkbutton(grid, text="Windows GUI subsystem", variable=self.windows_gui_var, command=self._refresh_command).grid(row=1, column=2, sticky="w", pady=2)
+        self.windows_diagnostics_check = ttk.Checkbutton(
+            grid, text="Windows diagnostics", variable=self.windows_diagnostics_var, command=self._refresh_command
+        )
+        self.windows_diagnostics_check.grid(row=1, column=1, sticky="w", pady=2)
+        self.windows_gui_check = ttk.Checkbutton(
+            grid, text="Windows GUI subsystem", variable=self.windows_gui_var, command=self._refresh_command
+        )
+        self.windows_gui_check.grid(row=1, column=2, sticky="w", pady=2)
 
         fields = ttk.Frame(advanced)
         fields.pack(fill="x", pady=(8, 0))
@@ -294,8 +298,8 @@ class AnyPS5Gui(tk.Tk):
 
     def _update_windows_options(self) -> None:
         state = tk.NORMAL if self.target_var.get() == "Windows" else tk.DISABLED
-        # The checkbuttons are not retained as attributes; disabling through the
-        # logical command builder is enough, but clear impossible combinations.
+        self.windows_diagnostics_check.configure(state=state)
+        self.windows_gui_check.configure(state=state)
         if state == tk.DISABLED:
             self.windows_diagnostics_var.set(False)
             self.windows_gui_var.set(False)
@@ -335,7 +339,7 @@ class AnyPS5Gui(tk.Tk):
         if not input_path.is_file():
             messagebox.showerror("AnyPS5", "Please select a valid PS5 ELF executable.")
             return
-        if not output_path:
+        if not output_path.name:
             messagebox.showerror("AnyPS5", "Please choose an output executable.")
             return
 
@@ -373,7 +377,6 @@ class AnyPS5Gui(tk.Tk):
 
     def _worker(self, command: list[str], output_path: Path) -> None:
         try:
-            env = os.environ.copy()
             self.process = subprocess.Popen(
                 command,
                 cwd=str(output_path.parent),
