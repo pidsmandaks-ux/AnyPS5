@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 #if defined(__linux__)
+#include <fstream>
+#include <string>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -356,6 +358,30 @@ static void CheckWriteWatch() {
     Require(munmap(raw, spanned + tableSpan) == 0);
 }
 
+static std::string BackingOf(const void* address) {
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps, line)) {
+        if (std::strtoull(line.c_str(), nullptr, 16) != reinterpret_cast<std::uintptr_t>(address)) continue;
+        const auto path = line.find('/');
+        return path == std::string::npos ? std::string() : line.substr(path);
+    }
+    return {};
+}
+
+static void CheckDirectMemoryBackingNeedsNoFilesystem() {
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
+    void* mapped = nullptr;
+    Require(sceKernelMapDirectMemory(&mapped, page, 3, 0, phys, 0) == 0);
+    const auto backing = BackingOf(mapped);
+    if (backing.rfind("/memfd:", 0) != 0) std::fprintf(stderr, "direct memory backing: %s\n", backing.c_str());
+    Require(backing.rfind("/memfd:", 0) == 0);
+    Require(sceKernelMunmap(mapped, page) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+}
+
 static void CheckDirectMemoryWriteWatch() {
     if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) {
         std::puts("write watch unavailable: direct memory not tested");
@@ -416,6 +442,7 @@ int main() {
 #if defined(__linux__)
     CheckWriteWatch();
     CheckDirectMemoryWriteWatch();
+    CheckDirectMemoryBackingNeedsNoFilesystem();
 #endif
     constexpr std::size_t page = 0x4000;
     const auto failed = reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1));
