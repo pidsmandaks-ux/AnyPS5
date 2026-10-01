@@ -71,6 +71,8 @@ jobs:
         run: cmake -S . -B build $CONFIGURE
       - name: Configure Windows
         if: matrix.platform == 'windows'
+        env:
+          SSL_CERT_FILE: C:\Program Files\Git\mingw64\etc\ssl\certs\ca-bundle.crt
         shell: cmd
         run: cmake -S . -B build %CONFIGURE%
       - name: Build project and tests (Linux)
