@@ -37,6 +37,7 @@ int APS5_VABI sceKernelAllocateDirectMemory(std::int64_t, std::int64_t, std::siz
 int APS5_VABI sceKernelMapDirectMemory(void**, std::size_t, int, int, std::int64_t, std::size_t);
 int APS5_VABI sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
 int APS5_VABI sceKernelReserveVirtualRange(void**, std::size_t, int, std::size_t);
+int APS5_VABI sceKernelMemoryPoolReserve(void*, std::size_t, std::size_t, int, void**);
 }
 
 static void Require(bool condition, std::source_location location = std::source_location::current()) {
@@ -122,6 +123,22 @@ static void CheckDirectMemoryFollowsPhysicalPages() {
     Require(sceKernelMunmap(fresh, page * 2) == 0);
     Require(sceKernelMunmap(filler, page * 2) == 0);
     Require(sceKernelReleaseDirectMemory(again, page * 2) == 0);
+}
+
+static void CheckFixedVirtualReservation() {
+    constexpr std::size_t page = 0x4000;
+    void* probe = nullptr;
+    Require(sceKernelReserveVirtualRange(&probe, page * 4, 0, 0) == 0);
+    Require(sceKernelMunmap(probe, page * 4) == 0);
+    void* const requested = static_cast<unsigned char*>(probe) + page;
+    void* fixed = requested;
+    Require(sceKernelReserveVirtualRange(&fixed, page * 2, 0x400010, 0) == 0);
+    Require(fixed == requested);
+    Require(sceKernelMunmap(fixed, page * 2) == 0);
+    void* pooled = nullptr;
+    Require(sceKernelMemoryPoolReserve(requested, page * 2, 0, 0x10, &pooled) == 0);
+    Require(pooled == requested);
+    Require(sceKernelMunmap(pooled, page * 2) == 0);
 }
 
 static void CheckSharedDirectMemoryLifecycle() {
@@ -436,6 +453,7 @@ static void CheckDirectMemoryWriteWatch() {
 int main() {
     CheckNamedAndHintedMappings();
     CheckDirectMemoryFollowsPhysicalPages();
+    CheckFixedVirtualReservation();
     CheckSharedDirectMemoryLifecycle();
     CheckHeapAfterMappingReuse();
     CheckSharedWriteTracking();
