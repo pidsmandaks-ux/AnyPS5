@@ -86,6 +86,14 @@ foreach(LIB_DIR ${LIBS_DIRS})
             target_link_libraries(${LIB_NAME} PRIVATE libkernel libc)
         endif()
 
+        if(WIN32 AND LIB_NAME STREQUAL "libSceNet") {
+            target_link_libraries(${LIB_NAME} PRIVATE ws2_32)
+            target_compile_definitions(${LIB_NAME} PRIVATE _WIN32_WINNT=0x0602)
+        elseif(WIN32 AND LIB_NAME STREQUAL "libSceNetCtl")
+            target_link_libraries(${LIB_NAME} PRIVATE ws2_32 iphlpapi)
+            target_compile_definitions(${LIB_NAME} PRIVATE _WIN32_WINNT=0x0602)
+        endif()
+
         set_target_properties(${LIB_NAME} PROPERTIES
                 PREFIX ""
                 SUFFIX .prx
