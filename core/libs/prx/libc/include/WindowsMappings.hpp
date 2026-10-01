@@ -129,22 +129,26 @@ public:
         const auto offset = view->second.offset;
         SYSTEM_INFO system{};
         GetSystemInfo(&system);
-        if (offset % system.dwAllocationGranularity != 0) throw refuse("the section offset is not a multiple of the allocation granularity");
         for (std::size_t done = 0; done < bytes; done += pageBytes, ++view) {
             if (view == views.end() || view->first != address + done || view->second.offset != offset + done) throw refuse("the range is not one contiguous run of views of a section");
             if (view->second.section != section && !sameSection(view->second.section->handle, section->handle)) throw refuse("the range spans several sections");
         }
-        void* alias = map(section->handle, GetCurrentProcess(), nullptr, offset, bytes, 0, PAGE_READWRITE, nullptr, 0);
+        const auto lead = offset % system.dwAllocationGranularity;
+        void* alias = map(section->handle, GetCurrentProcess(), nullptr, offset - lead, lead + bytes, 0, PAGE_READWRITE, nullptr, 0);
         if (alias == nullptr) {
             char text[160];
             std::snprintf(text, sizeof(text), "MapViewOfFile3 of a read-write alias of shared guest memory 0x%llx+0x%llx", static_cast<unsigned long long>(address), static_cast<unsigned long long>(bytes));
             throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), text);
         }
-        return alias;
+        return static_cast<char*>(alias) + lead;
     }
 
     void UnmapAlias(void* alias) {
-        if (alias != nullptr && !unmap(GetCurrentProcess(), alias, 0)) fail("unmap shared guest alias");
+        if (alias == nullptr) return;
+        SYSTEM_INFO system{};
+        GetSystemInfo(&system);
+        const auto base = reinterpret_cast<std::uintptr_t>(alias) & ~(static_cast<std::uintptr_t>(system.dwAllocationGranularity) - 1);
+        if (!unmap(GetCurrentProcess(), reinterpret_cast<void*>(base), 0)) fail("unmap shared guest alias");
     }
 
     bool Protection(std::uintptr_t address, std::uint32_t* protection) {
