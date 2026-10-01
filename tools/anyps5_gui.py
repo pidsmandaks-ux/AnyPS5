@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import queue
 import subprocess
+import sys
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -119,8 +120,8 @@ class AnyPS5Gui(tk.Tk):
         self.windows_gui_var = tk.BooleanVar(value=False)
         self.filter_var = tk.StringVar(value="")
         self.rpath_var = tk.StringVar(value="")
-        self.autorun_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready")
+        self.show_advanced_var = tk.BooleanVar(value=False)
         self.command_var = tk.StringVar(value="")
 
         self._build_style()
@@ -180,7 +181,15 @@ class AnyPS5Gui(tk.Tk):
             command=self._refresh_command,
         ).pack(side="left", padx=(16, 0))
 
-        advanced = ttk.LabelFrame(outer, text="3. Advanced (optional)", style="Section.TLabelframe", padding=10)
+        advanced_toggle = ttk.Checkbutton(
+            outer,
+            text="Show advanced options",
+            variable=self.show_advanced_var,
+            command=self._toggle_advanced,
+        )
+        advanced_toggle.pack(anchor="w", pady=(0, 4))
+
+        advanced = ttk.LabelFrame(outer, text="Advanced (optional)", style="Section.TLabelframe", padding=10)
         advanced.pack(fill="x", pady=(0, 10))
 
         grid = ttk.Frame(advanced)
@@ -210,8 +219,11 @@ class AnyPS5Gui(tk.Tk):
         rpath.bind("<KeyRelease>", lambda _e: self._refresh_command())
         fields.columnconfigure(3, weight=1)
 
-        command = ttk.LabelFrame(outer, text="Command preview", padding=8)
-        command.pack(fill="x", pady=(0, 10))
+        self.advanced_frame = advanced
+        self.advanced_frame.pack_forget()
+
+        self.command_frame = ttk.LabelFrame(outer, text="Command preview", padding=8)
+        self.command_frame.pack(fill="x", pady=(0, 10))
         ttk.Entry(command, textvariable=self.command_var, state="readonly").pack(fill="x")
 
         log_frame = ttk.LabelFrame(outer, text="Output", padding=8)
@@ -221,19 +233,38 @@ class AnyPS5Gui(tk.Tk):
 
         bottom = ttk.Frame(outer)
         bottom.pack(fill="x", pady=(10, 0))
-        ttk.Label(bottom, textvariable=self.status_var, style="Status.TLabel").pack(side="left")
-        ttk.Checkbutton(
-            bottom,
-            text="Launch after conversion",
-            variable=self.autorun_var,
-        ).pack(side="left", padx=12)
+        ttk.Label(bottom, textvariable=self.status_var, style="Status.TLabel").pack(side="left", fill="x", expand=True)
+
+        self.open_folder_button = ttk.Button(bottom, text="Open Folder", command=self.open_output_folder)
+        self.open_folder_button.pack(side="right", padx=(8, 0))
         self.stop_button = ttk.Button(bottom, text="Stop", command=self.stop_process, state="disabled")
         self.stop_button.pack(side="right", padx=(8, 0))
-        self.run_button = ttk.Button(bottom, text="Convert", style="Primary.TButton", command=self.start_process)
-        self.run_button.pack(side="right")
+        self.run_button = ttk.Button(bottom, text="Convert & Run", style="Primary.TButton", command=lambda: self.start_process(True))
+        self.run_button.pack(side="right", padx=(8, 0))
+        self.convert_button = ttk.Button(bottom, text="Convert", style="Primary.TButton", command=lambda: self.start_process(False))
+        self.convert_button.pack(side="right")
 
         self.input_var.trace_add("write", lambda *_: self._input_changed())
         self.relinker_var.trace_add("write", lambda *_: self._refresh_command())
+
+    def _toggle_advanced(self) -> None:
+        if self.show_advanced_var.get():
+            self.advanced_frame.pack(fill="x", pady=(0, 10), before=self.command_frame)
+        else:
+            self.advanced_frame.pack_forget()
+        self._refresh_command()
+
+    def _runtime_status(self, output_path: Path) -> str:
+        missing = []
+        if not (output_path.parent / "libs").is_dir():
+            missing.append("libs/")
+        if not (output_path.parent / "app0").is_dir():
+            missing.append("app0/")
+        return (
+            "Runtime layout detected: libs/ + app0/"
+            if not missing
+            else "Runtime layout incomplete: " + ", ".join(missing) + " missing."
+        )
 
     def _path_row(self, parent: ttk.Widget, label: str, variable: tk.StringVar, browse, row: int) -> None:
         ttk.Label(parent, text=label + ":", width=12).grid(row=row, column=0, sticky="w", pady=5)
@@ -325,7 +356,7 @@ class AnyPS5Gui(tk.Tk):
         )
         self.command_var.set(subprocess.list2cmdline(command))
 
-    def start_process(self) -> None:
+    def start_process(self, launch_after: bool = False) -> None:
         if self.process is not None:
             return
 
@@ -366,7 +397,7 @@ class AnyPS5Gui(tk.Tk):
         self.run_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
 
-        thread = threading.Thread(target=self._worker, args=(command, output_path), daemon=True)
+        thread = threading.Thread(target=self._worker, args=(command, output_path, launch_after), daemon=True)
         thread.start()
 
     @staticmethod
@@ -375,7 +406,7 @@ class AnyPS5Gui(tk.Tk):
             return subprocess.list2cmdline([value])
         return value
 
-    def _worker(self, command: list[str], output_path: Path) -> None:
+    def _worker(self, command: list[str], output_path: Path, launch_after: bool) -> None:
         try:
             self.process = subprocess.Popen(
                 command,
@@ -391,7 +422,7 @@ class AnyPS5Gui(tk.Tk):
             for line in self.process.stdout:
                 self.queue.put(("log", line.rstrip()))
             code = self.process.wait()
-            self.queue.put(("finished", (code, output_path)))
+            self.queue.put(("finished", (code, output_path, launch_after)))
         except Exception as exc:
             self.queue.put(("error", str(exc)))
 
@@ -411,21 +442,33 @@ class AnyPS5Gui(tk.Tk):
                 if kind == "log":
                     self._log(str(payload))
                 elif kind == "finished":
-                    code, output_path = payload
+                    code, output_path, launch_after = payload
                     self.process = None
+                    self.convert_button.configure(state="normal")
                     self.run_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
                     if code == 0:
                         self.status_var.set("Conversion completed")
                         self._log(f"SUCCESS: {output_path}")
-                        if self.autorun_var.get():
-                            self._launch(output_path)
+                        runtime = self._runtime_status(output_path)
+                        self._log(runtime)
+                        if launch_after:
+                            if (output_path.parent / "libs").is_dir() and (output_path.parent / "app0").is_dir():
+                                self._launch(output_path)
+                            else:
+                                messagebox.showwarning(
+                                    "AnyPS5",
+                                    "Conversion completed, but the runtime folders are incomplete.\n\n"
+                                    f"{runtime}\n\n"
+                                    f"Executable:\n{output_path}\n\n"
+                                    "Add the required runtime files, then use Open Folder.",
+                                )
                         else:
                             messagebox.showinfo(
                                 "AnyPS5",
                                 "Conversion completed.\n\n"
                                 f"Executable:\n{output_path}\n\n"
-                                "Keep the generated libs/ and app0/ folders beside it before launching.",
+                                f"{runtime}",
                             )
                     else:
                         self.status_var.set(f"Failed (exit code {code})")
@@ -443,11 +486,26 @@ class AnyPS5Gui(tk.Tk):
             pass
         self.after(100, self._drain_queue)
 
+    def open_output_folder(self) -> None:
+        path = Path(self.output_var.get().strip()) if self.output_var.get().strip() else None
+        folder = path.parent if path and path.parent.exists() else Path.cwd()
+        try:
+            if os.name == "nt":
+                os.startfile(str(folder))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+        except Exception as exc:
+            messagebox.showerror("AnyPS5", f"Could not open the output folder.\n\n{exc}")
+
     def _launch(self, output_path: Path) -> None:
         if not output_path.is_file():
             messagebox.showerror("AnyPS5", f"Output executable does not exist:\n{output_path}")
             return
         try:
+            if os.name != "nt":
+                output_path.chmod(output_path.stat().st_mode | 0o111)
             subprocess.Popen([str(output_path)], cwd=str(output_path.parent))
             self._log(f"LAUNCHED: {output_path}")
             self.status_var.set("Game launched")
