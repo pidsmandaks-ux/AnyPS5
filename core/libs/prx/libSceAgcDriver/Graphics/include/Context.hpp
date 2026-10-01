@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "prx/libc/include/General.hpp"
 
 namespace AgcDriver::Graphics {
 
@@ -26,15 +27,25 @@ class SamplerCache;
 class ShaderResources;
 
 inline void Require(bool condition, const std::string& reason) {
-    if (!condition) throw std::runtime_error("AGC graphics: " + reason);
+    if (!condition) {
+        AnyPs5Diagnostic_nid_no_patch("agc.graphics", "require", reason.c_str());
+        throw std::runtime_error("AGC graphics: " + reason);
+    }
 }
 
 inline void Check(VkResult result, const char* operation) {
-    if (result != VK_SUCCESS) throw std::runtime_error(std::string("AGC graphics: ") + operation + ": Vulkan result " + std::to_string(result));
+    if (result != VK_SUCCESS) {
+        const auto detail = std::string(operation) + ": Vulkan result " + std::to_string(result);
+        AnyPs5Diagnostic_nid_no_patch("agc.graphics.vulkan", operation, detail.c_str());
+        throw std::runtime_error(std::string("AGC graphics: ") + detail);
+    }
 }
 
 inline void Require(bool condition, const char* reason) {
-    if (!condition) throw std::runtime_error(std::string("AGC graphics: ") + reason);
+    if (!condition) {
+        AnyPs5Diagnostic_nid_no_patch("agc.graphics", "require", reason);
+        throw std::runtime_error(std::string("AGC graphics: ") + reason);
+    }
 }
 
 // Device entry points resolved once per device (VulkanDevice's State fills it after setup): the
@@ -136,7 +147,10 @@ struct Context {
         Require(deviceProc != nullptr, "missing Vulkan device function resolver");
         ++DeviceProcLookups();
         const auto function = reinterpret_cast<TFunction>(deviceProc(device, name));
-        if (function == nullptr) throw std::runtime_error(std::string("AGC graphics: missing Vulkan function: ") + name);
+        if (function == nullptr) {
+            AnyPs5Diagnostic_nid_no_patch("agc.graphics.vulkan", "missing_function", name);
+            throw std::runtime_error(std::string("AGC graphics: missing Vulkan function: ") + name);
+        }
         return function;
     }
 
@@ -151,6 +165,7 @@ struct Context {
         for (std::uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
             if ((mask & (1u << i)) != 0 && (memory.memoryTypes[i].propertyFlags & flags) == flags) return i;
         }
+        AnyPs5Diagnostic_nid_no_patch("agc.graphics.vulkan", "memory_type", "required Vulkan memory type is unavailable");
         throw std::runtime_error("AGC graphics: required Vulkan memory type is unavailable");
     }
 };
