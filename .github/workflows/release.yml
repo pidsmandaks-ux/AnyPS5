@@ -97,10 +97,7 @@ jobs:
       - name: Build portable GUI
         run: |
           python -m pip install --upgrade pyinstaller
-          python -m PyInstaller --noconfirm --clean --onefile --windowed \\
-            --name AnyPS5-GUI \\
-            --distpath gui-dist --workpath pyinstaller-work \\
-            tools/anyps5_gui.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed             --name AnyPS5-GUI             --distpath gui-dist --workpath pyinstaller-work             tools/anyps5_gui.py
           if [[ "${{ matrix.platform }}" == "windows" ]]; then
             test -s gui-dist/AnyPS5-GUI.exe
           else
@@ -112,12 +109,7 @@ jobs:
           if [[ "${{ matrix.platform }}" == "windows" ]]; then
             gui="${gui}.exe"
           fi
-          python tools/package_release.py \\
-            --platform "${{ matrix.platform }}" \\
-            --build build \\
-            --output dist \\
-            --version "$RELEASE_TAG" \\
-            --gui "$gui"
+          python tools/package_release.py             --platform "${{ matrix.platform }}"             --build build             --output dist             --version "$RELEASE_TAG"             --gui "$gui"
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}
@@ -145,17 +137,7 @@ jobs:
       - name: Check release files and collect documentation
         shell: bash
         run: |
-          for file in \\
-            "prx-windows-$RELEASE_TAG.zip" \\
-            "prx-windows-$RELEASE_TAG.tar.gz" \\
-            "prx-linux-$RELEASE_TAG.zip" \\
-            "prx-linux-$RELEASE_TAG.tar.gz" \\
-            "relinker-$RELEASE_TAG.exe" \\
-            "relinker-$RELEASE_TAG" \\
-            "anyps5-portable-windows-$RELEASE_TAG.zip" \\
-            "anyps5-portable-windows-$RELEASE_TAG.tar.gz" \\
-            "anyps5-portable-linux-$RELEASE_TAG.zip" \\
-            "anyps5-portable-linux-$RELEASE_TAG.tar.gz"; do
+          for file in             "prx-windows-$RELEASE_TAG.zip"             "prx-windows-$RELEASE_TAG.tar.gz"             "prx-linux-$RELEASE_TAG.zip"             "prx-linux-$RELEASE_TAG.tar.gz"             "relinker-$RELEASE_TAG.exe"             "relinker-$RELEASE_TAG"             "anyps5-portable-windows-$RELEASE_TAG.zip"             "anyps5-portable-windows-$RELEASE_TAG.tar.gz"             "anyps5-portable-linux-$RELEASE_TAG.zip"             "anyps5-portable-linux-$RELEASE_TAG.tar.gz"; do
             test -s "dist/$file"
           done
           python tools/package_release.py --docs docs/user --output dist
