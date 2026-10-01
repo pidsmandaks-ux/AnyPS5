@@ -22,6 +22,10 @@ APP_TITLE = "AnyPS5 - Game Porting Assistant"
 
 
 def project_root() -> Path:
+    # A PyInstaller one-file build runs from a temporary extraction directory.
+    # Resolve bundled resources relative to the actual GUI executable instead.
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 
