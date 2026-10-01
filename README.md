@@ -38,6 +38,8 @@ The project targets maximum compiler portability. Support for additional compile
 
 See the [game compatibility list](docs/user/COMPATIBILITY.md) for tested games and known issues.
 
+For troubleshooting a new title, see [diagnostics](docs/user/DIAGNOSTICS.md).
+
 ## Input mapping
 
 SDL-mapped game controllers are supported, including analog sticks and triggers. Keyboard and mouse controls can be configured with an `anyps5-input.ini` file. See [input mapping](docs/user/INPUT_MAPPING.md) for the supported devices and configuration format.
