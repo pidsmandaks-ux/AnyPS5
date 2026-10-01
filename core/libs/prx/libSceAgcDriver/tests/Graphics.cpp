@@ -689,6 +689,12 @@ VKAPI_ATTR void VKAPI_CALL mockCmdDispatch(VkCommandBuffer, std::uint32_t x, std
     mock.lastDispatchGroups = {x, y, z};
 }
 
+VKAPI_ATTR void VKAPI_CALL mockCmdUpdateBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, const void* data) {
+    auto& memory = mock.memories.at(mock.bufferMemory.at(buffer));
+    Require(offset + size <= memory.size(), "a buffer update exceeds its buffer");
+    std::memcpy(memory.data() + offset, data, static_cast<std::size_t>(size));
+}
+
 PFN_vkVoidFunction VKAPI_CALL mockProc(VkDevice, const char* name) {
     static const std::map<std::string_view, PFN_vkVoidFunction> table{
         {"vkGetBufferDeviceAddressKHR", reinterpret_cast<PFN_vkVoidFunction>(mockGetBufferDeviceAddress)},
@@ -715,7 +721,8 @@ PFN_vkVoidFunction VKAPI_CALL mockProc(VkDevice, const char* name) {
         {"vkDestroyPipeline", reinterpret_cast<PFN_vkVoidFunction>(mockDestroyPipeline)},
         {"vkCmdBindPipeline", reinterpret_cast<PFN_vkVoidFunction>(mockCmdBindPipeline)},
         {"vkCmdPushConstants", reinterpret_cast<PFN_vkVoidFunction>(mockCmdPushConstants)},
-        {"vkCmdDispatch", reinterpret_cast<PFN_vkVoidFunction>(mockCmdDispatch)}
+        {"vkCmdDispatch", reinterpret_cast<PFN_vkVoidFunction>(mockCmdDispatch)},
+        {"vkCmdUpdateBuffer", reinterpret_cast<PFN_vkVoidFunction>(mockCmdUpdateBuffer)}
     };
     const auto it = table.find(name);
     return it == table.end() ? nullptr : it->second;
@@ -970,6 +977,35 @@ void resourceTests() {
         fragment.bindings.front().binding = 1;
         fragment.bindings.front().guestDescriptor = vsharp(guestFirst.data(), 16);
     }
+}
+
+void misalignedShaderDataTests() {
+    mock = MockVulkan{};
+    auto context = mockContext();
+    context.limits.minStorageBufferOffsetAlignment = 16;
+    const auto commands = reinterpret_cast<VkCommandBuffer>(std::uintptr_t{1});
+    alignas(64) std::array<std::uint32_t, 8> guest{1, 2, 3, 4, 5, 6, 7, 8};
+    {
+        ShaderRecompiler::RecompileResult compute;
+        compute.bindings.push_back(makeBinding(Role::GuestBuffers, 0, 2, join(vsharp(guest.data(), 32), vsharp(guest.data() + 1, 8))));
+        compute.bindings.push_back(makeBinding(Role::ShaderData, 1, 1, {0x11, 0x22, 0}));
+        compute.memoryOffsetDword = 2;
+        auto live = compute;
+        live.bindings[1].guestDescriptor = {0x33, 0x44, 0};
+        const AgcDriver::Graphics::CompiledShader shader{ShaderRecompiler::ShaderStage::Compute, &compute, 0};
+        const AgcDriver::Graphics::CompiledShader liveShader{ShaderRecompiler::ShaderStage::Compute, &live, 0};
+        AgcDriver::Graphics::ShaderResources resources(context, shader);
+        const auto& views = findWrite(0);
+        Require(views.buffers.size() == 2 && views.buffers[0].range == 32 && views.buffers[1].range == 12 && views.buffers[1].offset == views.buffers[0].offset, "the misaligned view is not bound from the aligned offset below it");
+        const auto data = findWrite(1).buffers.at(0).buffer;
+        const std::array<std::uint32_t, 3> patched{0x11, 0x22, 0x400};
+        Require(sameBytes(bufferBytes(data), patched.data(), sizeof(patched)), "the shader data buffer does not hold the misaligned view's offset");
+        Require(resources.RefreshData(commands, liveShader), "a refresh with different words recorded nothing");
+        const std::array<std::uint32_t, 3> refreshed{0x33, 0x44, 0x400};
+        Require(sameBytes(bufferBytes(data), refreshed.data(), sizeof(refreshed)), "a data refresh dropped the misaligned view's offset");
+        Require(!resources.DataWordsDiffer(liveShader) && resources.DataWordsHash() == AgcDriver::Graphics::ShaderResources::DataWordsHash(liveShader), "the refreshed template's words are not the dispatch's");
+    }
+    Require(mock.live == 0, "misaligned shader data resources leaked Vulkan objects");
 }
 
 struct ModuleShape {
@@ -1536,6 +1572,7 @@ int main() {
         InitialContextTests();
         pushConstantTests();
         resourceTests();
+        misalignedShaderDataTests();
         debugBranchTests();
         validationTests();
         pixelParameterSlotTests();
