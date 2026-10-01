@@ -50,12 +50,61 @@ struct ShaderComputeStageInfo {
     }
 };
 
+enum class PixelInput : std::uint32_t {
+    PerspectiveSample,
+    PerspectiveCenter,
+    PerspectiveCentroid,
+    PerspectivePullModel,
+    LinearSample,
+    LinearCenter,
+    LinearCentroid,
+    LineStipple,
+    PositionX,
+    PositionY,
+    PositionZ,
+    PositionW,
+    FrontFace,
+    Ancillary,
+    SampleCoverage,
+    PositionFixedPoint,
+    Count
+};
+
+constexpr std::uint32_t PixelInputBit(PixelInput input) {
+    return 1u << static_cast<std::uint32_t>(input);
+}
+
+constexpr std::uint32_t PixelInputVgprCount(PixelInput input) {
+    switch (input) {
+    case PixelInput::PerspectiveSample:
+    case PixelInput::PerspectiveCenter:
+    case PixelInput::PerspectiveCentroid:
+    case PixelInput::LinearSample:
+    case PixelInput::LinearCenter:
+    case PixelInput::LinearCentroid:
+        return 2u;
+    case PixelInput::PerspectivePullModel:
+        return 3u;
+    default:
+        return 1u;
+    }
+}
+
+constexpr std::uint32_t PixelInputVgpr(std::uint32_t inputAddr, PixelInput input) {
+    std::uint32_t vgpr = 0;
+    for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(input); ++i) {
+        if ((inputAddr & (1u << i)) != 0u) vgpr += PixelInputVgprCount(static_cast<PixelInput>(i));
+    }
+    return vgpr;
+}
+
 struct ShaderPixelStageInfo {
     std::uint32_t interpolatorCount;
     std::array<std::uint32_t, 32> interpolatorSettings;
     bool wave32;
-    std::uint32_t perspectiveCenterVgpr;
+    std::uint32_t inputAddr;
     bool hasPerspectiveCenterVgpr;
+    bool perspectiveCentroid;
     bool posX;
     bool posY;
     bool posZ;
@@ -64,6 +113,7 @@ struct ShaderPixelStageInfo {
     bool ancillary;
     bool sampleShading;
     bool noPerspective;
+    bool linearCentroid;
     bool pixelKillEnable;
     bool depthExportEnable;
     bool sampleMaskExportEnable;
