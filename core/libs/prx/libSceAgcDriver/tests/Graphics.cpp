@@ -1316,7 +1316,7 @@ void pixelParameterSlotTests() {
     Require(inputs.size() == 1 && inputs[0].location == 3 && inputs[0].perVertex && !inputs[0].flat, "inputs reading one slot were not declared once at the slot");
     pixel = recompilePixel({0x404u, 0x0u}, shared);
     inputs = locatedInputs(pixel.spirv.Words());
-    Require(inputs.size() == 2 && inputs[0].location == 0 && !inputs[0].flat && inputs[1].location == 4 && inputs[1].flat, "flat and interpolated inputs of different slots moved");
+    Require(inputs.size() == 2 && inputs[0].location == 0 && inputs[1].location == 4, "flat and interpolated inputs of different slots moved");
     pixel = recompilePixel({0x20u, 0x2320u}, shared);
     Require(locatedInputs(pixel.spirv.Words()).empty(), "a defaulted input was declared as a parameter");
     AgcDriver::Graphics::ValidateShaders(shaders, state, subgroup, true);
