@@ -86,6 +86,14 @@ foreach(LIB_DIR ${LIBS_DIRS})
             target_link_libraries(${LIB_NAME} PRIVATE libkernel libc)
         endif()
 
+        if(WIN32 AND LIB_NAME STREQUAL "libSceNet")
+            target_link_libraries(${LIB_NAME} PRIVATE ws2_32)
+            target_compile_definitions(${LIB_NAME} PRIVATE _WIN32_WINNT=0x0602)
+        elseif(WIN32 AND LIB_NAME STREQUAL "libSceNetCtl")
+            target_link_libraries(${LIB_NAME} PRIVATE ws2_32 iphlpapi)
+            target_compile_definitions(${LIB_NAME} PRIVATE _WIN32_WINNT=0x0602)
+        endif()
+
         set_target_properties(${LIB_NAME} PROPERTIES
                 PREFIX ""
                 SUFFIX .prx
@@ -436,6 +444,26 @@ add_executable(player_invitation_dialog_tests tests/PlayerInvitationDialog.cpp)
     if(WIN32)
         set_tests_properties(guest_udp PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_executable(guest_tcp_tests tests/GuestTcp.cpp)
+    target_include_directories(guest_tcp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_tcp_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_tcp_tests)
+    add_test(NAME guest_tcp COMMAND guest_tcp_tests)
+    set_tests_properties(guest_tcp PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_tcp PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_executable(guest_sce_net_tests tests/GuestSceNet.cpp)
+    target_include_directories(guest_sce_net_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_sce_net_tests PRIVATE libSceNet libSceNetCtl)
+    configure_windows_unwind(guest_sce_net_tests)
+    add_test(NAME guest_sce_net COMMAND guest_sce_net_tests)
+    set_tests_properties(guest_sce_net PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_sce_net PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNet>")
     endif()
     add_executable(guest_address_tests tests/GuestAddressConversion.cpp)
     target_include_directories(guest_address_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
