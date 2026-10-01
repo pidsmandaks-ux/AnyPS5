@@ -1,5 +1,6 @@
 #include "Translation/AttributeInstructions.hpp"
 #include "Translation/TranslationContext.hpp"
+#include "Recompiler.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -105,6 +106,18 @@ void TranslationContext::vInterpP1F32() {
 }
 
 void TranslationContext::vInterpP2F32(const RdnaInstruction& inst) {
+    if (pixelInput != nullptr && inst.source0.kind == RdnaOperandKind::VectorRegister && inst.source1.value < 32u) {
+        const auto readsPair = [&](PixelInput input) {
+            const auto base = pixelInput->psInputVgpr[static_cast<std::size_t>(input)];
+            return base != ShaderPixelInputInfo::NoPixelInputVgpr && inst.source0.reg == base + 1u;
+        };
+        const auto bit = 1u << inst.source1.value;
+        if (readsPair(PixelInput::LinearCenter) || readsPair(PixelInput::LinearCentroid)) {
+            program.Metadata().pixelLinearInputs |= bit;
+        } else if (readsPair(PixelInput::PerspectiveCenter) || readsPair(PixelInput::PerspectiveCentroid)) {
+            program.Metadata().pixelPerspectiveInputs |= bit;
+        }
+    }
     IrValue& value = ir.Emit(IrOpcode::GetAttribute, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value)});
     writeOperand(inst.destination, &value);
 }

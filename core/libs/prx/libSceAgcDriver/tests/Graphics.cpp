@@ -5,7 +5,9 @@
 #include "prx/libSceAgcDriver/Graphics/include/VertexInput.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
+#include "ControlFlow/RequestSerializer.hpp"
 #include <spirv/unified1/spirv.hpp>
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdlib>
@@ -13,7 +15,10 @@
 #include <initializer_list>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
+#include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -239,6 +244,124 @@ void ShaderStageTests() {
     queue.context[0x2d5] = 0x2000;
     queue.context.erase(0x1b6);
     expectFailure([&] { AgcDriver::Graphics::DecodeState(queue); }, "missing register");
+}
+
+constexpr std::array<std::uint8_t, 8> IdentityExports{0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u, 0xe4u};
+
+std::vector<spv::BuiltIn> pixelBuiltinsRead(std::uint32_t ena, std::uint32_t addr, std::uint32_t source) {
+    auto queue = makeState();
+    queue.context[0x1b3] = ena;
+    queue.context[0x1b4] = addr;
+    const auto pixel = AgcDriver::Graphics::DecodePixelStageInfo(queue.context, IdentityExports);
+    const std::array<std::uint32_t, 3> code{0xf800180fu, source * 0x01010101u, 0xbf810000u};
+    ShaderRecompiler::RecompileRequest request{};
+    request.shader = {ShaderRecompiler::ShaderStage::Fragment, 0x30000u, code, 0, {}};
+    request.context.waveSize = 64;
+    request.context.pixel = pixel;
+    request.target.vulkanVersion = 0x00401000u;
+    request.target.spirvVersion = 0x00010300u;
+    request.target.subgroupSize = 64;
+    request.target.fragmentShaderBarycentricEnabled = true;
+    request.layout.pushConstantSizeBytes = 128;
+    request.useCache = false;
+    const auto result = ShaderRecompiler::Recompile(request);
+    const auto& words = result.spirv.Words();
+    std::map<std::uint32_t, spv::BuiltIn> builtins;
+    std::vector<spv::BuiltIn> read;
+    for (std::size_t at = 5; at < words.size() && (words[at] >> 16u) != 0; at += words[at] >> 16u) {
+        const auto op = static_cast<spv::Op>(words[at] & 0xffffu);
+        if (op == spv::OpDecorate && words[at + 2] == spv::DecorationBuiltIn) builtins[words[at + 1]] = static_cast<spv::BuiltIn>(words[at + 3]);
+        if (op != spv::OpLoad && op != spv::OpAccessChain && op != spv::OpInBoundsAccessChain) continue;
+        const auto found = builtins.find(words[at + 3]);
+        if (found != builtins.end() && std::find(read.begin(), read.end(), found->second) == read.end()) read.push_back(found->second);
+    }
+    return read;
+}
+
+bool readsBuiltin(const std::vector<spv::BuiltIn>& read, spv::BuiltIn builtin) {
+    return std::find(read.begin(), read.end(), builtin) != read.end();
+}
+
+std::vector<std::uint32_t> pixelNoPerspectiveLocations() {
+    auto queue = makeState();
+    queue.context[0x1b3] = 0x22u;
+    queue.context[0x1b4] = 0x22u;
+    queue.context[0x1b6] = 2u;
+    queue.context[0x191] = 0u;
+    queue.context[0x192] = 1u;
+    const auto pixel = AgcDriver::Graphics::DecodePixelStageInfo(queue.context, IdentityExports);
+    const std::array<std::uint32_t, 8> code{0xc8100000u, 0xc8110001u, 0xc8140402u, 0xc8150403u, 0xf800180fu, 0x05040504u, 0xbf810000u, 0xbf810000u};
+    ShaderRecompiler::RecompileRequest request{};
+    request.shader = {ShaderRecompiler::ShaderStage::Fragment, 0x30000u, code, 0, {}};
+    request.context.waveSize = 64;
+    request.context.pixel = pixel;
+    request.target.vulkanVersion = 0x00401000u;
+    request.target.spirvVersion = 0x00010300u;
+    request.target.subgroupSize = 64;
+    request.target.fragmentShaderBarycentricEnabled = true;
+    request.layout.pushConstantSizeBytes = 128;
+    request.useCache = false;
+    const auto result = ShaderRecompiler::Recompile(request);
+    const auto& words = result.spirv.Words();
+    std::map<std::uint32_t, std::uint32_t> locations;
+    std::vector<std::uint32_t> noPerspective;
+    for (std::size_t at = 5; at < words.size() && (words[at] >> 16u) != 0; at += words[at] >> 16u) {
+        if (static_cast<spv::Op>(words[at] & 0xffffu) != spv::OpDecorate) continue;
+        if (words[at + 2] == spv::DecorationLocation) locations[words[at + 1]] = words[at + 3];
+        if (words[at + 2] == spv::DecorationNoPerspective) noPerspective.push_back(words[at + 1]);
+    }
+    std::vector<std::uint32_t> result2;
+    for (const auto id : noPerspective) result2.push_back(locations.count(id) != 0 ? locations.at(id) : 0xffffffffu);
+    return result2;
+}
+
+void PixelInputLayoutTests() {
+    using ShaderRecompiler::PixelInput;
+    using ShaderRecompiler::PixelInputVgpr;
+    auto queue = makeState();
+    const auto decode = [&](std::uint32_t ena, std::uint32_t addr) {
+        queue.context[0x1b3] = ena;
+        queue.context[0x1b4] = addr;
+        return AgcDriver::Graphics::DecodePixelStageInfo(queue.context, IdentityExports);
+    };
+    auto pixel = decode(0x326u, 0x326u);
+    Require(pixel.inputAddr == 0x326u && pixel.hasPerspectiveCenterVgpr && pixel.perspectiveCentroid && pixel.noPerspective && !pixel.linearCentroid && pixel.posX && pixel.posY && !pixel.posZ, "the centroid input flags were not decoded");
+    Require(PixelInputVgpr(pixel.inputAddr, PixelInput::PerspectiveCenter) == 0u && PixelInputVgpr(pixel.inputAddr, PixelInput::PerspectiveCentroid) == 2u && PixelInputVgpr(pixel.inputAddr, PixelInput::LinearCenter) == 4u && PixelInputVgpr(pixel.inputAddr, PixelInput::PositionX) == 6u && PixelInputVgpr(pixel.inputAddr, PixelInput::PositionY) == 7u, "the centroid layout moved the inputs");
+    pixel = decode(0x1146u, 0x1146u);
+    Require(pixel.linearCentroid && !pixel.noPerspective && PixelInputVgpr(pixel.inputAddr, PixelInput::LinearCentroid) == 4u && PixelInputVgpr(pixel.inputAddr, PixelInput::PositionX) == 6u && PixelInputVgpr(pixel.inputAddr, PixelInput::FrontFace) == 7u, "the linear centroid layout moved the inputs");
+    pixel = decode(0x506u, 0x7afu);
+    Require(pixel.inputAddr == 0x7afu && !pixel.posY && pixel.posZ && PixelInputVgpr(pixel.inputAddr, PixelInput::PerspectiveCentroid) == 4u && PixelInputVgpr(pixel.inputAddr, PixelInput::PositionX) == 12u && PixelInputVgpr(pixel.inputAddr, PixelInput::PositionZ) == 14u, "ADDR-only inputs did not reserve their VGPRs");
+    for (const auto bit : {0x8u, 0x80u, 0x4000u, 0x8000u}) {
+        expectFailure([&] { static_cast<void>(decode(0x2u | bit, 0x2u | bit)); }, "unsupported SPI_PS_INPUT_ENA/ADDR");
+    }
+    pixel = decode(0x546u, 0x7c7u);
+    {
+        ShaderRecompiler::RecompileRequest request{};
+        const std::array<std::uint32_t, 1> code{0xbf810000u};
+        request.shader = {ShaderRecompiler::ShaderStage::Fragment, 0x30000u, code, 0, {}};
+        request.context.waveSize = 64;
+        request.context.pixel = pixel;
+        const ShaderRecompiler::RequestSerializer serializer;
+        const auto back = serializer.Deserialize(serializer.Serialize(request));
+        const auto& p = *back.request.context.pixel;
+        Require(p.inputAddr == 0x7c7u && p.hasPerspectiveCenterVgpr && p.perspectiveCentroid && p.linearCentroid && !p.noPerspective && p.posX && !p.posY && p.posZ, "the pixel input layout did not survive serialization");
+    }
+    for (const auto source : {0u, 2u, 3u}) {
+        const auto read = pixelBuiltinsRead(0x106u, 0x106u, source);
+        Require(readsBuiltin(read, spv::BuiltInBaryCoordKHR) && !readsBuiltin(read, spv::BuiltInFragCoord), "a centroid-layout I/J VGPR does not hold the barycentrics: v" + std::to_string(source));
+    }
+    const auto noPerspective = pixelNoPerspectiveLocations();
+    Require(noPerspective.size() == 1 && noPerspective[0] == 1u, "only the parameter interpolated through the linear pair must be NoPerspective");
+    auto read = pixelBuiltinsRead(0x106u, 0x106u, 4u);
+    Require(readsBuiltin(read, spv::BuiltInFragCoord) && !readsBuiltin(read, spv::BuiltInBaryCoordKHR), "POS_X is not in v4 after the center and centroid pairs");
+    read = pixelBuiltinsRead(0x326u, 0x326u, 5u);
+    Require(readsBuiltin(read, spv::BuiltInBaryCoordNoPerspKHR) && !readsBuiltin(read, spv::BuiltInFragCoord), "LINEAR_CENTER's J is not v5");
+    read = pixelBuiltinsRead(0x326u, 0x326u, 6u);
+    Require(readsBuiltin(read, spv::BuiltInFragCoord) && !readsBuiltin(read, spv::BuiltInBaryCoordKHR) && !readsBuiltin(read, spv::BuiltInBaryCoordNoPerspKHR), "POS_X is not in v6 after three I/J pairs");
+    read = pixelBuiltinsRead(0x102u, 0x106u, 4u);
+    Require(readsBuiltin(read, spv::BuiltInFragCoord), "an ADDR-only centroid pair did not reserve v2/v3");
+    read = pixelBuiltinsRead(0x102u, 0x106u, 2u);
+    Require(!readsBuiltin(read, spv::BuiltInFragCoord) && !readsBuiltin(read, spv::BuiltInBaryCoordKHR), "an ADDR-only centroid pair was loaded");
 }
 
 void DisabledColorTests() {
@@ -864,6 +987,7 @@ struct ModuleShape {
     bool perVertex = false;
     std::uint32_t perVertexLength = 3;
     bool parameterOutput = false;
+    std::uint32_t parameterLocation = 0;
     bool rectParameters = false;
     bool secondTarget = false;
 };
@@ -901,7 +1025,7 @@ std::vector<std::uint32_t> makeModule(const ModuleShape& shape) {
     if (shape.parameterOutput) {
         const auto parameter = id();
         emit(declarations, spv::OpVariable, {outputPointer, parameter, spv::StorageClassOutput});
-        emit(annotations, spv::OpDecorate, {parameter, spv::DecorationLocation, 0});
+        emit(annotations, spv::OpDecorate, {parameter, spv::DecorationLocation, shape.parameterLocation});
         extraInterface.push_back(parameter);
     }
     if (shape.secondTarget) {
@@ -1077,6 +1201,95 @@ void rectListTests() {
     const Context context{};
     const AgcDriver::Pm4::DrawParameters draw{0, 4, 0, 1, 0, false};
     expectFailure([&] { Draw(context, state, draw, {}); }, "incomplete rect-list");
+}
+
+ShaderRecompiler::RecompileResult recompilePixel(std::initializer_list<std::uint32_t> controls, std::span<const std::uint32_t> code) {
+    auto queue = makeState();
+    queue.context[0x1b3] = 0x2u;
+    queue.context[0x1b4] = 0x2u;
+    queue.context[0x1b6] = static_cast<std::uint32_t>(controls.size());
+    std::uint32_t index = 0;
+    for (const auto control : controls) queue.context[0x191 + index++] = control;
+    const auto pixel = AgcDriver::Graphics::DecodePixelStageInfo(queue.context, IdentityExports);
+    ShaderRecompiler::RecompileRequest request{};
+    request.shader = {ShaderRecompiler::ShaderStage::Fragment, 0x30000u, code, 0, {}};
+    request.context.waveSize = 64;
+    request.context.pixel = pixel;
+    request.target.vulkanVersion = 0x00401000u;
+    request.target.spirvVersion = 0x00010300u;
+    request.target.subgroupSize = 64;
+    request.target.fragmentShaderBarycentricEnabled = true;
+    request.layout.pushConstantSizeBytes = 128;
+    request.useCache = false;
+    return ShaderRecompiler::Recompile(request);
+}
+
+struct LocatedInput {
+    std::uint32_t location;
+    bool flat;
+    bool perVertex;
+};
+
+std::vector<LocatedInput> locatedInputs(std::span<const std::uint32_t> words) {
+    std::map<std::uint32_t, LocatedInput> decorated;
+    std::set<std::uint32_t> inputs;
+    for (std::size_t at = 5; at < words.size() && (words[at] >> 16u) != 0; at += words[at] >> 16u) {
+        const auto op = static_cast<spv::Op>(words[at] & 0xffffu);
+        if (op == spv::OpVariable && words[at + 3] == spv::StorageClassInput) inputs.insert(words[at + 2]);
+        if (op != spv::OpDecorate) continue;
+        auto& input = decorated[words[at + 1]];
+        if (words[at + 2] == spv::DecorationLocation) input.location = words[at + 3] + 1u;
+        if (words[at + 2] == spv::DecorationFlat) input.flat = true;
+        if (words[at + 2] == spv::DecorationPerVertexKHR) input.perVertex = true;
+    }
+    std::vector<LocatedInput> result;
+    for (const auto& [id, input] : decorated) {
+        if (input.location != 0 && inputs.contains(id)) result.push_back({input.location - 1u, input.flat, input.perVertex});
+    }
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.location < b.location; });
+    return result;
+}
+
+void pixelParameterSlotTests() {
+    using AgcDriver::Graphics::CompiledShader;
+    const VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    auto state = AgcDriver::Graphics::DecodeState(makeState());
+    ShaderRecompiler::RecompileResult vertex;
+    vertex.spirv = makeModule({.parameterOutput = true});
+    const std::array<std::uint32_t, 8> mixed{0xc8100000u, 0xc8110001u, 0xc8160402u, 0xc81a0802u, 0xc81e0f02u, 0xf800180fu, 0x07060504u, 0xbf810000u};
+    auto pixel = recompilePixel({0x0u, 0x400u, 0x22u, 0x320u}, mixed);
+    auto inputs = locatedInputs(pixel.spirv.Words());
+    Require(inputs.size() == 1 && inputs[0].location == 0 && inputs[0].perVertex, "a slot read flat and interpolated did not become one per-vertex input");
+    std::array<CompiledShader, 2> shaders{{{ShaderRecompiler::ShaderStage::Vertex, &vertex, 0}, {ShaderRecompiler::ShaderStage::Fragment, &pixel, 0}}};
+    AgcDriver::Graphics::ValidateShaders(shaders, state, subgroup, true);
+    const std::array<std::uint32_t, 7> shared{0xc8100000u, 0xc8110001u, 0xc8140500u, 0xc8150501u, 0xf800180fu, 0x05040504u, 0xbf810000u};
+    pixel = recompilePixel({0x3u, 0x3u}, shared);
+    inputs = locatedInputs(pixel.spirv.Words());
+    Require(inputs.size() == 1 && inputs[0].location == 3 && !inputs[0].perVertex && !inputs[0].flat, "inputs reading one slot were not declared once at the slot");
+    pixel = recompilePixel({0x404u, 0x0u}, shared);
+    inputs = locatedInputs(pixel.spirv.Words());
+    Require(inputs.size() == 2 && inputs[0].location == 0 && !inputs[0].flat && inputs[1].location == 4 && inputs[1].flat, "flat and interpolated inputs of different slots moved");
+    pixel = recompilePixel({0x20u, 0x2320u}, shared);
+    Require(locatedInputs(pixel.spirv.Words()).empty(), "a defaulted input was declared as a parameter");
+    AgcDriver::Graphics::ValidateShaders(shaders, state, subgroup, true);
+    const std::array<std::uint32_t, 7> vertices{0xc8120002u, 0xc8160000u, 0xc81a0001u, 0xc81e0302u, 0xf800180fu, 0x07060504u, 0xbf810000u};
+    const auto subtracts = [](std::span<const std::uint32_t> words) {
+        std::size_t count = 0;
+        for (std::size_t at = 5; at < words.size() && (words[at] >> 16u) != 0; at += words[at] >> 16u) count += (words[at] & 0xffffu) == spv::OpFSub;
+        return count;
+    };
+    pixel = recompilePixel({0x423u}, vertices);
+    inputs = locatedInputs(pixel.spirv.Words());
+    Require(inputs.size() == 1 && inputs[0].location == 3 && inputs[0].perVertex, "a pass-through input (OFFSET bit 5 with FLAT_SHADE) was not read per vertex at its slot");
+    Require(subtracts(pixel.spirv.Words()) == 0, "v_interp_mov p10/p20 of a pass-through input subtracted vertex 0");
+    ShaderRecompiler::RecompileResult slotVertex;
+    slotVertex.spirv = makeModule({.parameterOutput = true, .parameterLocation = 3});
+    const std::array<CompiledShader, 2> slotShaders{{{ShaderRecompiler::ShaderStage::Vertex, &slotVertex, 0}, {ShaderRecompiler::ShaderStage::Fragment, &pixel, 0}}};
+    AgcDriver::Graphics::ValidateShaders(slotShaders, state, subgroup, true);
+    pixel = recompilePixel({0x403u}, vertices);
+    inputs = locatedInputs(pixel.spirv.Words());
+    Require(inputs.size() == 1 && inputs[0].location == 3 && inputs[0].perVertex && subtracts(pixel.spirv.Words()) == 2, "v_interp_mov p10/p20 of a flat input did not read differences to vertex 0");
+    expectFailure([&] { recompilePixel({0x423u, 0x3u}, shared); }, "passes its vertices through unchanged");
 }
 
 void validationTests() {
@@ -1319,11 +1532,13 @@ int main() {
         DepthStencilTests();
         DisabledColorTests();
         ShaderStageTests();
+        PixelInputLayoutTests();
         InitialContextTests();
         pushConstantTests();
         resourceTests();
         debugBranchTests();
         validationTests();
+        pixelParameterSlotTests();
         rectListTests();
         mock = MockVulkan{};
         auto bdaContext = mockContext();
