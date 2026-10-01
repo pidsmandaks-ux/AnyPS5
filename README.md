@@ -34,6 +34,20 @@ On Intel hosts, pass `--to-intel` to the relinker to lower supported AMD-only in
 
 The project targets maximum compiler portability. Support for additional compilers will be addressed after the first successful game launch.
 
+## GUI
+
+A simple cross-platform Tkinter GUI is available at [tools/anyps5_gui.py](tools/anyps5_gui.py). It wraps the relinker so the usual workflow is: select the PS5 ELF, choose Windows or Linux, choose an output location, then click **Convert**. The GUI can also launch the converted executable after a successful conversion.
+
+The GUI uses only Python's standard library and automatically looks for a relinker built at `build/core/relinker/relinker` (or `relinker.exe`). It can also browse for the executable manually. Run it with:
+
+```bash
+python3 tools/anyps5_gui.py
+```
+
+On Windows, the same script can be started with `py tools\\anyps5_gui.py`. A Python installation with Tkinter is required.
+
+The generated runtime must still contain the required `libs/` and `app0/` layout next to the converted executable; the GUI does not supply proprietary game data or system libraries.
+
 ## Compatibility
 
 See the [game compatibility list](docs/user/COMPATIBILITY.md) for tested games and known issues.
