@@ -103,6 +103,9 @@ ExportFlags TranslationContext::addExportInfo(const RdnaInstruction& inst) {
 }
 
 void TranslationContext::vInterpP1F32(const RdnaInstruction& inst) {
+    if (pixelInput != nullptr && inst.source1.value < 32u && pixelInput->InputIsPassthrough(inst.source1.value)) {
+        throw std::runtime_error("pixel input " + std::to_string(inst.source1.value) + " passes its vertices through unchanged but is read with v_interp_p1/p2");
+    }
     if (!fragmentShaderBarycentricEnabled) return;
     auto& delta = ir.Emit(IrOpcode::GetInterpolationParameter, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(0u)});
     auto& origin = ir.Emit(IrOpcode::GetInterpolationParameter, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(2u)});
@@ -112,6 +115,9 @@ void TranslationContext::vInterpP1F32(const RdnaInstruction& inst) {
 }
 
 void TranslationContext::vInterpP2F32(const RdnaInstruction& inst) {
+    if (pixelInput != nullptr && inst.source1.value < 32u && pixelInput->InputIsPassthrough(inst.source1.value)) {
+        throw std::runtime_error("pixel input " + std::to_string(inst.source1.value) + " passes its vertices through unchanged but is read with v_interp_p1/p2");
+    }
     if (fragmentShaderBarycentricEnabled) {
         auto& delta = ir.Emit(IrOpcode::GetInterpolationParameter, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(1u)});
         auto& product = ir.Emit(IrOpcode::FPMul32, IrType::F32, {&ir.BitCastF32(delta), readOperand(inst.source0, IrType::F32)});
