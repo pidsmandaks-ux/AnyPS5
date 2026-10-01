@@ -98,7 +98,6 @@ private:
         for (std::uintptr_t base = PreferredBase; base + MinimumSize <= MapAreaEnd; base += MinimumSize) {
             for (std::size_t size = MaximumSize; size >= MinimumSize; size /= 2) {
                 if (base + size > MapAreaEnd) continue;
-                _writeWatched = std::getenv("APS5_NO_WRITE_WATCH") == nullptr;
                 void* reserved = WindowsMappings::Get().Reserve(reinterpret_cast<void*>(base), size);
                 if (!reserved) continue;
                 _base = reinterpret_cast<std::uintptr_t>(reserved);
