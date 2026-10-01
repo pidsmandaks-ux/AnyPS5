@@ -224,7 +224,7 @@ class AnyPS5Gui(tk.Tk):
 
         self.command_frame = ttk.LabelFrame(outer, text="Command preview", padding=8)
         self.command_frame.pack(fill="x", pady=(0, 10))
-        ttk.Entry(command, textvariable=self.command_var, state="readonly").pack(fill="x")
+        ttk.Entry(self.command_frame, textvariable=self.command_var, state="readonly").pack(fill="x")
 
         log_frame = ttk.LabelFrame(outer, text="Output", padding=8)
         log_frame.pack(fill="both", expand=True)
