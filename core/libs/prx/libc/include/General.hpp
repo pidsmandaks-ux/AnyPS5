@@ -8,6 +8,8 @@
 #include "general/VabiMacros.hpp"
 #include "general/ExportMacros.hpp"
 
+extern "C" bool AnyPs5DiagnosticsEnabled_nid_no_patch();
+extern "C" void AnyPs5Diagnostic_nid_no_patch(const char* category, const char* name, const char* detail);
 extern "C" void NotImplemented_nid_no_patch(const char* funcName);
 extern "C" void CxaFinalize_nid_no_patch(void* dsoHandle);
 

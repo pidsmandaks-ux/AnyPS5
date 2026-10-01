@@ -7,10 +7,75 @@
 #include <optional>
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <chrono>
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestHeap.hpp"
 
 namespace {
+struct DiagnosticState {
+    std::mutex mutex;
+    bool initialized = false;
+    bool enabled = false;
+    bool logAll = false;
+    std::filesystem::path file;
+    std::vector<std::string> emitted;
+};
+
+DiagnosticState& Diagnostic() {
+    static DiagnosticState state;
+    return state;
+}
+
+void InitializeDiagnostic(DiagnosticState& state) {
+    if (state.initialized) return;
+    state.initialized = true;
+    const char* enabled = std::getenv("ANYPS5_DIAGNOSTICS");
+    if (!enabled || (*enabled != '1' && *enabled != 'y' && *enabled != 'Y' && *enabled != 't' && *enabled != 'T'))
+        return;
+    state.enabled = true;
+    const char* all = std::getenv("ANYPS5_DIAGNOSTICS_ALL");
+    state.logAll = all && (*all == '1' || *all == 'y' || *all == 'Y' || *all == 't' || *all == 'T');
+    if (const char* path = std::getenv("ANYPS5_DIAGNOSTICS_FILE"); path && *path)
+        state.file = std::filesystem::path(path);
+}
+
+void EmitDiagnosticLocked(DiagnosticState& state, const char* category, const char* name, const char* detail) noexcept {
+    try {
+        const std::string categoryText = category ? category : "unknown";
+        const std::string nameText = name ? name : "unknown";
+        const std::string detailText = detail ? detail : "";
+        const std::string key = categoryText + "|" + nameText + "|" + detailText;
+        if (!state.logAll && std::find(state.emitted.begin(), state.emitted.end(), key) != state.emitted.end()) return;
+        if (!state.logAll) state.emitted.push_back(key);
+
+        const auto now = std::chrono::system_clock::now();
+        const auto seconds = std::chrono::time_point_cast<std::chrono::seconds>(now);
+        const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now - seconds).count();
+        std::ostringstream line;
+        line << "[AnyPS5][diagnostic] "
+             << std::chrono::system_clock::to_time_t(seconds)
+             << "." << std::setw(3) << std::setfill('0') << millis
+             << " tid=" << std::this_thread::get_id()
+             << " category=" << categoryText
+             << " name=" << nameText
+             << " detail=" << detailText;
+        const auto text = line.str();
+        std::cerr << text << '\n';
+        if (!state.file.empty()) {
+            std::ofstream output(state.file, std::ios::app);
+            if (output) output << text << '\n';
+        }
+    } catch (...) {
+    }
+}
+
 // Guest prefixes (without leading slashes) mapped to host directories, e.g. save-data mount points:
 // the PS5 hands the title a short mount point ("/savedata0") whose files live under _sd/<dir name>.
 struct PathAliases {
@@ -152,6 +217,22 @@ extern "C" char* APS5_VABI getcwd_nid_postfix(char* buffer, std::size_t size) {
       catch (const std::filesystem::filesystem_error& error) { errno = DirectoryFailure(error.code()); return nullptr; }
 }
 
+extern "C" bool AnyPs5DiagnosticsEnabled_nid_no_patch() {
+    auto& state = Diagnostic();
+    std::lock_guard lock(state.mutex);
+    InitializeDiagnostic(state);
+    return state.enabled;
+}
+
+extern "C" void AnyPs5Diagnostic_nid_no_patch(const char* category, const char* name, const char* detail) {
+    auto& state = Diagnostic();
+    std::lock_guard lock(state.mutex);
+    InitializeDiagnostic(state);
+    if (!state.enabled) return;
+    EmitDiagnosticLocked(state, category, name, detail);
+}
+
 extern "C" void NotImplemented_nid_no_patch(const char* funcName) {
+    AnyPs5Diagnostic_nid_no_patch("prx", funcName, "function is not implemented");
     throw std::runtime_error(std::string(funcName) + " not implemented");
 }
