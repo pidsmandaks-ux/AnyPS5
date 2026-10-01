@@ -38,15 +38,17 @@ The project targets maximum compiler portability. Support for additional compile
 
 A simple cross-platform Tkinter GUI is available at [tools/anyps5_gui.py](tools/anyps5_gui.py). It wraps the relinker so the usual workflow is: select the PS5 ELF, choose Windows or Linux, choose an output location, then click **Convert**. The GUI can also launch the converted executable after a successful conversion.
 
-The GUI uses only Python's standard library and automatically looks for a relinker built at `build/core/relinker/relinker` (or `relinker.exe`). It can also browse for the executable manually. Run it with:
+The GUI uses only Python's standard library and automatically looks for a relinker built at `build/core/relinker/relinker` (or `relinker.exe`). In the normal view, you only choose the PS5 ELF, choose Windows or Linux, and click **Convert** or **Convert & Run**. Advanced relinker switches are hidden until **Show advanced options** is enabled.
+
+Run it with:
 
 ```bash
 python3 tools/anyps5_gui.py
 ```
 
-On Windows, the same script can be started with `py tools\\anyps5_gui.py`. A Python installation with Tkinter is required.
+On Windows, you can also double-click [tools/RunAnyPS5_GUI.bat](tools/RunAnyPS5_GUI.bat). On Linux/macOS, use `sh tools/run_anyps5_gui.sh`. A Python installation with Tkinter is required.
 
-The generated runtime must still contain the required `libs/` and `app0/` layout next to the converted executable; the GUI does not supply proprietary game data or system libraries.
+The GUI checks for the expected `libs/` and `app0/` directories before **Convert & Run**, opens the output folder from **Open Folder**, and makes a converted Linux executable runnable. It does not supply proprietary game data or system libraries; the generated runtime still needs the required `libs/` and `app0/` contents beside the executable.
 
 ## Compatibility
 
