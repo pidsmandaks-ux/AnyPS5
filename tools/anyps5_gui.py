@@ -33,6 +33,10 @@ def find_relinker() -> Path | None:
     root = project_root()
     names = ("relinker.exe", "relinker") if os.name == "nt" else ("relinker", "relinker.exe")
     candidates = [
+        root / name
+        for name in names
+    ]
+    candidates += [
         root / "build" / "core" / "relinker" / name
         for name in names
     ]
@@ -230,11 +234,6 @@ class AnyPS5Gui(tk.Tk):
         self.command_frame.pack(fill="x", pady=(0, 10))
         ttk.Entry(self.command_frame, textvariable=self.command_var, state="readonly").pack(fill="x")
 
-        log_frame = ttk.LabelFrame(outer, text="Output", padding=8)
-        log_frame.pack(fill="both", expand=True)
-        self.log = ScrolledText(log_frame, height=14, wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=True)
-
         bottom = ttk.Frame(outer)
         bottom.pack(fill="x", pady=(10, 0))
         ttk.Label(bottom, textvariable=self.status_var, style="Status.TLabel").pack(side="left", fill="x", expand=True)
@@ -247,6 +246,11 @@ class AnyPS5Gui(tk.Tk):
         self.run_button.pack(side="right", padx=(8, 0))
         self.convert_button = ttk.Button(bottom, text="Convert", style="Primary.TButton", command=lambda: self.start_process(False))
         self.convert_button.pack(side="right")
+
+        log_frame = ttk.LabelFrame(outer, text="Output", padding=8)
+        log_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.log = ScrolledText(log_frame, height=10, wrap="word", state="disabled")
+        self.log.pack(fill="both", expand=True)
 
         self.input_var.trace_add("write", lambda *_: self._input_changed())
         self.relinker_var.trace_add("write", lambda *_: self._refresh_command())
